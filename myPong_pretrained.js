@@ -1,3 +1,10 @@
+/*  Loading pretrained model */
+async function init() {
+    model = await tf.loadModel('http://localhost/Neural_Network_Ping_Pong/tfjsmodel/model.json');
+    console.log('Model fetched successfully!')
+    animate(step);
+}
+
 /*  Classes     */
 function Paddle(xPosition, yPosition, paddleWidth, paddleHeight) {
     // This class generates a pong paddle
@@ -40,8 +47,8 @@ function Ball(xPosition, yPosition) {
     
     this.xPosition = xPosition;
     this.yPosition = yPosition;
-    this.xSpeed = Math.floor(Math.random() * 12 - 6);
-    this.ySpeed = 5;
+    this.xSpeed = Math.floor(Math.random() * 4 - 2);
+    this.ySpeed = 4;
     this.radius = 5;
 }
 
@@ -77,8 +84,9 @@ Ball.prototype.update = function(userPaddle, computerPaddle) {
     if(this.yPosition < 0 || this.yPosition > tableHeight) {
         this.xPosition = 200;
         this.yPosition = 300;
-        this.xSpeed = Math.floor(Math.random() * 12 - 6);
-        this.ySpeed = 5;
+        this.xSpeed = Math.floor(Math.random() * 4 - 2);
+        this.ySpeed = 4;
+        saveDat.newTurn();
     }
     
     if(topEdge > (tableHeight / 2)) {
@@ -102,6 +110,7 @@ function Computer() {
     // Creates a computer player
     
     this.paddle = new Paddle(175, 10, 50, 10);
+    this.aiPlays = false;
 }
 
 Computer.prototype.render = function() {
@@ -112,16 +121,15 @@ Computer.prototype.render = function() {
 
 Computer.prototype.update = function(ball) {
     // Computer class instance function. Moves computer paddle location based on location of ball
-    
     var xBall = ball.xPosition;
     // Finds position difference between computer paddle and ball
     var delta = -((this.paddle.xPosition + (this.paddle.paddleWidth / 2)) - xBall);
     
     if(delta < 0 && delta < -4) {
-        delta = -4;
+        delta = -5;
     }
     else if(delta > 0 && delta > 4) {
-        delta = 4;
+        delta = 5;
     }
     
     this.paddle.move(delta, 0);
@@ -133,6 +141,13 @@ Computer.prototype.update = function(ball) {
         this.paddle.xPosition = tableWidth - this.paddle.paddleWidth;
     }
 };
+
+Computer.prototype.aiUpdate = function(move) {
+    if(move != 0) {
+        move = -move;
+    }
+    this.paddle.move(4 * move, 0);
+}
 
 function Player() {
     // Creates a user player
@@ -164,10 +179,123 @@ Player.prototype.update = function() {
     }
 };
 
+function SaveData() {
+    // Class to store and save data
+    
+    this.previousData = null;
+    this.trainingData = [[], [], []];
+    this.lastDataObject = null;
+    this.turn = 0;
+    this.dataXS = [];
+    this.dataYS = [];
+}
+
+SaveData.prototype.generateData = function(player, computer, ball) {
+    
+    if(this.previousData == null) {
+        data = [tableWidth - player.xPosition, tableWidth - ball.xPosition, tableHeight - ball.yPosition, tableWidth - ball.xSpeed, tableHeight - ball.ySpeed];
+        this.previousData = data;
+        return
+    }
+    
+    dataX = [tableWidth - player.xPosition, tableWidth - ball.xPosition, tableHeight - ball.yPosition, tableWidth - ball.xSpeed, tableHeight - ball.ySpeed];
+    
+    index = (tableWidth -  player.xPosition > this.previousData[0]) ? 0 : ((tableWidth - player.xPosition  == this.previousData[0]) ? 1 : 2);
+    
+    this.lastDataObject = [...this.previousData, ...dataX];
+    this.trainingData[index].push(this.lastDataObject);
+    this.previousData = dataX;
+};
+
+SaveData.prototype.newTurn = function() {
+    this.turn += 1;
+    console.log('Turn' + this.turn);
+    
+    computer.ai_plays = true;
+    
+    if(this.turn % 2 == 0) {
+        computer.aiPlays = true;
+    }
+    
+    if(this.turn % 3 == 0) {
+        computer.aiPlays = false;
+        this.saveData();
+    }
+}
+
+SaveData.prototype.saveData = function() {
+    // Creates dataset after n turns and retrains model
+    
+    console.log('Trainig');
+    
+    len = Math.min(this.trainingData[0].length, this.trainingData[1].length, this.trainingData[2].length);
+    
+    if(!len) {
+        console.log('No data to save');
+        return;
+    }
+    
+    for(i = 0; i < 3; i++) {
+        this.dataXS.push(...this.trainingData[i].slice(0, len));
+        this.dataYS.push(...Array(len).fill([i == 0 ? 1: 0, i == 1 ? 1 : 0, i == 2 ? 1 : 0]));
+    }
+    
+    ai.train(this.dataXS, this.dataYS);
+    this.resetData();
+}
+
+SaveData.prototype.resetData = function() {
+    // Delete previous data after training model
+    
+    this.previousData = null;
+    this.trainingData = [[], [], []];
+    this.dataXS = [];
+    this.dataYS = [];
+};
+
+function AI() {
+}
+
+AI.prototype.train = function(dataXS, dataYS) {
+    const xs = tf.tensor(dataXS);
+    const ys = tf.tensor(dataYS);
+    
+    (async function() {
+        const optimizer = tf.train.adam(0.001);
+        model.compile({
+            optimizer: optimizer,
+            loss: 'categoricalCrossentropy',
+            metrics: ['accuracy'],
+        });
+        
+        let result = await model.fit(xs, ys, {
+            batchSize: 64,
+            epochs: 1,
+            shuffle: true,
+            validationSplit: 0.1,
+            callbacks: {
+                onBatchEnd: async(batch, logs) => {
+                    console.log("Step " + batch + ", loss:" + logs.loss.toFixed(5) + ", acc: " + logs.acc.toFixed(5));
+                },
+            },
+        });
+    }());
+    
+    console.log("Trained");
+};
+
+AI.prototype.predict = function() {
+    if(saveDat.lastDataObject != null) {
+        var prediction = model.predict(tf.tensor2d([saveDat.lastDataObject], [1, 10]));
+        return -(tf.argMax(prediction, 1).dataSync()-1);
+    }
+}
+
 /*  Global variables    */
 var tableHeight = 600;
 var tableWidth = 400;
 var keysDown = {};
+var stop = false;
 
 // Create a canvas
 var canvas = document.createElement("canvas");
@@ -180,14 +308,20 @@ var animate = window.requestAnimationFrame || window.webkitRequestAnimationFrame
     window.setTimeout(callback, 1000 / 60);
 };
 
-// Create a ball
+// Create a Ball
 var ball = new Ball(200, 300);
 
-// Create a user player
+// Create a User player
 var player = new Player();
 
-// Create a computer player
+// Create a Computer player
 var computer = new Computer();
+
+// Create a SaveData object
+var saveDat = new SaveData();
+
+// AI object
+var ai = new AI();
 
 // Render different elements
 var render = function() {
@@ -200,13 +334,27 @@ var render = function() {
 
 // Update different elements
 var update = function() {
-    player.update();
-    computer.update(ball);
+    player.update(ball);
+    saveDat.generateData(player.paddle, computer.paddle, ball);
+    
+    if(computer.ai_plays) {
+        move = ai.predict();
+        computer.aiUpdate(move);
+    }
+    else {
+        computer.update(ball);
+    }
     ball.update(player.paddle, computer.paddle);
 }
 
+var model = null;
+
 // Animate this function to create each frame
 var step = function() {
+    if(stop) {
+        return;
+    }
+    
     update();
     render();
     animate(step);
@@ -216,7 +364,7 @@ var step = function() {
 
 /*  Initialization  */
 document.body.appendChild(canvas);
-animate(step);
+init();
 
 // Check keystrokes for user interaction
 window.addEventListener('keydown', function(event) {

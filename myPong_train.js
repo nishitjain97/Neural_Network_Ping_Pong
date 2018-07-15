@@ -17,7 +17,7 @@ Paddle.prototype.render = function() {
     context.fillRect(this.xPosition, this.yPosition, this.paddleWidth, this.paddleHeight);
 };
 
-Paddle.prototype.move = function(xDir = 0, yDir = 0) {
+Paddle.prototype.move = function(xDir, yDir) {
     //Paddle class instance function. Moves the paddle xDir and yDir
     
     this.xPosition += xDir;
@@ -41,7 +41,7 @@ function Ball(xPosition, yPosition) {
     this.xPosition = xPosition;
     this.yPosition = yPosition;
     this.xSpeed = Math.floor(Math.random() * 12 - 6);
-    this.ySpeed = 40;
+    this.ySpeed = 5;
     this.radius = 5;
 }
 
@@ -78,7 +78,7 @@ Ball.prototype.update = function(userPaddle, computerPaddle) {
         this.xPosition = 200;
         this.yPosition = 300;
         this.xSpeed = Math.floor(Math.random() * 12 - 6);
-        this.ySpeed = 40;
+        this.ySpeed = Math.floor(Math.random() * 10) % 2 == 0 ? 5 : -5;
         saveDat.newTurn();
     }
     
@@ -118,11 +118,11 @@ Computer.prototype.update = function(ball) {
     // Finds position difference between computer paddle and ball
     var delta = -((this.paddle.xPosition + (this.paddle.paddleWidth / 2)) - xBall);
     
-    if(delta < 0) {
-        delta = -32;
+    if(delta < 0 && delta < -4) {
+        delta = -5;
     }
-    else if(delta > 0) {
-        delta = 32;
+    else if(delta > 0 && delta > 4) {
+        delta = 5;
     }
     
     this.paddle.move(delta, 0);
@@ -213,7 +213,7 @@ SaveData.prototype.saveData = function() {
     var a = document.createElement("a");
     var file = new Blob([JSON.stringify({xs: dataXS, ys: dataYS})], {type: 'application/json'});
     a.href = URL.createObjectURL(file);
-    a.download = 'trainingData.json';
+    a.download = 'trainingData' + dateTime + '.json';
     document.body.appendChild(a);
     a.click();
     
